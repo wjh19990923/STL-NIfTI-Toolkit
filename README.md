@@ -17,6 +17,7 @@ A lightweight toolkit for converting, transforming and processing STL and NIfTI 
 
 <div style="display: flex; gap: 10px;">
   <img src="data/transform_match.png" width="49%"/>
+  <img src="data/transform_slicer.png" width="49%"/>
 </div>
 - 🔻 Downsample or resample NIfTI files to target resolution to save storage
 

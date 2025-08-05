@@ -13,8 +13,11 @@ A lightweight toolkit for converting, transforming and processing STL and NIfTI 
   <img src="data/test_flumatch_C_SIGM_02_st_d_02_012.tif_ct.png" width="49%"/>
 </div>
 
-- 📐 Apply rigid transformations to STL models
+- 📐 find rigid transformations of STL and NIfTI models using cloud point ICP method.
 
+<div style="display: flex; gap: 10px;">
+  <img src="data/transform_match.png" width="49%"/>
+</div>
 - 🔻 Downsample or resample NIfTI files to target resolution to save storage
 
 - 🦵 Compatible with femur/tibia/prosthesis pre-op & post-op data

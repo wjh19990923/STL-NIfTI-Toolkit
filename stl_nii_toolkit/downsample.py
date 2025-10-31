@@ -110,5 +110,5 @@ def downsample_nifti(niiFilePath, scalingFactor=2):
     print("Downsampling completed. Saved to:", resampledNiiFilePath)
     
 if __name__ == "__main__":
-    niiFilePath = rf"C:\Users\Public\Public Dupla\github_adrian\pytorch3d_pose_refiner\test_files\Bill_Li_Tibia_recentered.nii"
+    niiFilePath = rf"C:\Users\Public\Public Dupla\github_adrian\pytorch3d_pose_refiner\test_files\Bill_Li_Femur_HU1200_filled.nii"
     downsample_nifti(niiFilePath)

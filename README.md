@@ -19,10 +19,27 @@ A lightweight toolkit for converting, transforming and processing STL and NIfTI 
   <img src="data/transform_match.png" width="49%"/>
   <img src="data/transform_slicer.png" width="49%"/>
 </div>
+
 - 🔻 Downsample or resample NIfTI files to target resolution to save storage
 
-- 🦵 Compatible with femur/tibia/prosthesis pre-op & post-op data
+e.g. using only voxels with values; compressing from 200MB --> 20MB 
 
+<p align="left">
+  <img src="data/downsample.png" alt="LMB Logo" width="360"/>
+</p>
+
+-  Statistical Shape Modelling (SSM) of your target anatomies:
+
+from left to right: mean shape, 1sd shape, -1sd shape, random shape;
+<div style="display: flex; gap: 10px;">
+  <img src="data/mean shape.png" width="49%"/>
+  <img src="data/1sd.png" width="49%"/>
+  <img src="data/-1sd.png" width="49%"/>
+  <img src="data/random.png" width="49%"/>
+</div>
+
+
+- 🦵 Compatible with femur/tibia/prosthesis pre-op & post-op data
 - 📦 Lightweight and easy to use
 
 ## Installation

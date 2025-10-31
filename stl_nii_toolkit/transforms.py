@@ -3,7 +3,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 
-def find_transform(source_stl: str, target_stl: str) -> np.ndarray:
+def find_transform(source_stl: str, target_stl: str, number_of_points: int = 100000, visualize: bool = False) -> np.ndarray:
     """
     给定两个 STL 文件，计算将 source 配准到 target 的刚性变换矩阵。
     返回 4x4 的变换矩阵。
@@ -12,8 +12,10 @@ def find_transform(source_stl: str, target_stl: str) -> np.ndarray:
     source = o3d.io.read_triangle_mesh(source_stl)
     target = o3d.io.read_triangle_mesh(target_stl)
 
-    source_pcd = source.sample_points_uniformly(number_of_points=100000)
-    target_pcd = target.sample_points_uniformly(number_of_points=100000)
+    source_pcd = source.sample_points_uniformly(
+        number_of_points=number_of_points)
+    target_pcd = target.sample_points_uniformly(
+        number_of_points=number_of_points)
 
     source_pcd.estimate_normals()
     target_pcd.estimate_normals()
@@ -28,7 +30,8 @@ def find_transform(source_stl: str, target_stl: str) -> np.ndarray:
         source_pcd, target_pcd,
         max_correspondence_distance=10.0,
         estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(),
-        criteria=o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=2000)
+        criteria=o3d.pipelines.registration.ICPConvergenceCriteria(
+            max_iteration=2000)
     )
 
     # 合并初始对齐与 ICP 变换
@@ -46,11 +49,12 @@ def find_transform(source_stl: str, target_stl: str) -> np.ndarray:
     print("🎯 Euler angles (degrees) [Z, Y, X]:", np.round(euler_deg, 2))
 
     # 可视化配准效果
-    source_pcd.transform(reg_p2p.transformation)
-    o3d.visualization.draw_geometries([
-        source_pcd.paint_uniform_color([1, 0, 0]),
-        target_pcd.paint_uniform_color([0, 1, 0])
-    ])
+    if visualize:
+        source_pcd.transform(reg_p2p.transformation)
+        o3d.visualization.draw_geometries([
+            source_pcd.paint_uniform_color([1, 0, 0]),
+            target_pcd.paint_uniform_color([0, 1, 0])
+        ])
 
     return T_total
 

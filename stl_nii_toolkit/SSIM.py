@@ -19,8 +19,9 @@ def resample_to_shape(volume, target_shape=(128, 128, 128)):
 
 def normalize_intensity(volume):
     """强度归一化到 [0, 1]"""
-    vmin, vmax = np.percentile(volume, (1, 99))
-    volume = np.clip(volume, vmin, vmax)
+    # vmin, vmax = np.percentile(volume, (1, 99))
+    vmin, vmax = -1024, 1024
+    # volume = np.clip(volume, vmin, vmax)
     return (volume - vmin) / (vmax - vmin + 1e-8)
 
 
@@ -69,7 +70,8 @@ def get_icp_rotation(moving_vol, ref_vol, threshold=0.1, max_iter=50):
         pcd_moving, pcd_ref,
         max_correspondence_distance=10.0,
         estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(),
-        criteria=o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=max_iter),
+        criteria=o3d.pipelines.registration.ICPConvergenceCriteria(
+            max_iteration=max_iter),
     )
 
     R_o3d = reg.transformation[:3, :3]
@@ -182,9 +184,12 @@ def main():
     # ==============================
     for i in range(n_components):
         sigma = np.sqrt(pca.explained_variance_[i])
-        mode_plus = (pca.mean_ + 3 * sigma * pca.components_[i]).reshape(target_shape)
-        mode_minus = (pca.mean_ - 3 * sigma * pca.components_[i]).reshape(target_shape)
-        print(f"\n🎨 Mode {i+1}: 可视化 ±3σ (方差占比: {pca.explained_variance_ratio_[i]*100:.2f}%)")
+        mode_plus = (pca.mean_ + 3 * sigma *
+                     pca.components_[i]).reshape(target_shape)
+        mode_minus = (pca.mean_ - 3 * sigma *
+                      pca.components_[i]).reshape(target_shape)
+        print(
+            f"\n🎨 Mode {i+1}: 可视化 ±3σ (方差占比: {pca.explained_variance_ratio_[i]*100:.2f}%)")
         visualize_mode(mean_volume, mode_plus, mode_minus, i)
 
     print("\n✅ ICP旋转(坐标系修正) + 平移 + PCA 建模完成！")

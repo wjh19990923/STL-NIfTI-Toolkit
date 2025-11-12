@@ -96,7 +96,7 @@ def downsample_nifti(niiFilePath, scalingFactor=2):
     print(f"Replaced {num_zero_voxels} voxels with value 0 to -1024.")
     cropped_img = nb.Nifti1Image(data, affine=cropped_img.affine, header=cropped_img.header)
 
-    resampledNiiFilePath = str.replace(niiFilePath, ".nii", "_resampled.nii")
+    resampledNiiFilePath = str.replace(niiFilePath, ".nii", f"_resampled_sf{scalingFactor}.nii")
     cropped_img.to_filename(resampledNiiFilePath)
 
     # read again and check the result

@@ -2,7 +2,7 @@ import open3d as o3d
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-
+# align two STL meshes and compute the rigid transformation matrix
 def find_transform(source_stl: str, target_stl: str, number_of_points: int = 100000, visualize: bool = False) -> np.ndarray:
     """
     给定两个 STL 文件，计算将 source 配准到 target 的刚性变换矩阵。

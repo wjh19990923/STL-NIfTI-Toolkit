@@ -92,7 +92,7 @@ def downsample_nifti(niiFilePath, scalingFactor=2):
     data = cropped_img.get_fdata()
     # substitute <= 0 with -1024
     num_zero_voxels = np.sum(data <= 0)
-    data[data <= 0.1] = -1024
+    data[data <= 0.001] = -1024
     print(f"Replaced {num_zero_voxels} voxels with value 0 to -1024.")
     cropped_img = nb.Nifti1Image(data, affine=cropped_img.affine, header=cropped_img.header)
 
@@ -110,5 +110,5 @@ def downsample_nifti(niiFilePath, scalingFactor=2):
     print("Downsampling completed. Saved to:", resampledNiiFilePath)
     
 if __name__ == "__main__":
-    niiFilePath = rf"C:\Users\Public\Public Dupla\github_adrian\pytorch3d_pose_refiner\test_files\Bill_Li_Femur_HU1200_filled.nii"
-    downsample_nifti(niiFilePath)
+    niiFilePath = rf"P:\Projects\CMB_healthy_knee_tdpf\project_only\Imaging\Segmentations\Segmentations_JW\DPHK_01_Femur_RE.nii" # "D:\kneefit_model_nii\SUBN_02_Tibia_RE_Volume.nii"
+    downsample_nifti(niiFilePath, scalingFactor=2)

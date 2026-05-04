@@ -172,9 +172,10 @@ def process_single_stl(stl_path, voxel_size=(0.4, 0.4, 0.4), HU=10000, show_anim
 
 # === 示例调用 ===
 if __name__ == "__main__":
-    folder_path = r"C:\Users\Public\Public Dupla\github_adrian\pytorch3d_pose_refiner\test_files"
-    stl_file = "Bill_Li_Femur.stl"
+    
+    folder_path = rf"C:\Users\Public\DPZM_02\postop\gt_03_new\outputdpzm_02\anatomies\DPZM_02_original"
+    stl_file = "ana_000002.stl"
     stl_path = os.path.join(folder_path, stl_file)
     # faster with larger voxel size (1.0,1.0,1.0)
-    output_path = process_single_stl(stl_path, voxel_size=(0.4, 0.4, 0.4), HU=1200, show_animation=True)
+    output_path = process_single_stl(stl_path, voxel_size=(0.2,0.2,0.2), HU=10000, show_animation=True)
     print(f"\n[FINAL] Output file saved to: {output_path}")

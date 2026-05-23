@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>STL NIfTI Toolkit</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace">
+        <div class="panel controls-panel">
+          <div class="brand-row">
+            <img src="data/lmb_logo.png" alt="LMB logo" />
+            <div>
+              <h1>STL NIfTI Toolkit</h1>
+              <p>Local browser tools for surface and volumetric model conversion.</p>
+            </div>
+          </div>
+
+          <div class="tabs" role="tablist" aria-label="Toolkit modes">
+            <button class="tab-button active" data-tab="inspect" type="button">Inspect</button>
+            <button class="tab-button" data-tab="stl-to-nii" type="button">STL to NIfTI</button>
+            <button class="tab-button" data-tab="nii-to-stl" type="button">NIfTI to STL</button>
+            <button class="tab-button" data-tab="match" type="button">STL Match</button>
+          </div>
+
+          <section class="tab-panel active" id="inspect-panel">
+            <label class="file-card">
+              <span>STL or NIfTI file</span>
+              <input id="inspect-file" type="file" accept=".stl,.nii,.gz" />
+            </label>
+            <button id="inspect-button" class="primary-action" type="button">Inspect file</button>
+          </section>
+
+          <section class="tab-panel" id="stl-to-nii-panel">
+            <label class="file-card">
+              <span>Input STL</span>
+              <input id="voxel-stl-file" type="file" accept=".stl" />
+            </label>
+            <div class="grid-two">
+              <label>
+                Voxel size (mm)
+                <input id="voxel-size" type="number" min="0.1" step="0.1" value="1.0" />
+              </label>
+              <label>
+                Bone HU
+                <input id="voxel-hu" type="number" step="100" value="10000" />
+              </label>
+            </div>
+            <label class="check-row">
+              <input id="voxel-fill" type="checkbox" checked />
+              Fill interior along Z rays
+            </label>
+            <button id="stl-to-nii-button" class="primary-action" type="button">Create NIfTI</button>
+          </section>
+
+          <section class="tab-panel" id="nii-to-stl-panel">
+            <label class="file-card">
+              <span>Input NIfTI</span>
+              <input id="nii-file" type="file" accept=".nii,.gz" />
+            </label>
+            <div class="grid-two">
+              <label>
+                Threshold
+                <input id="nii-threshold" type="number" step="1" value="0" />
+              </label>
+              <label>
+                Max voxels
+                <input id="nii-max-voxels" type="number" min="1000" step="1000" value="250000" />
+              </label>
+            </div>
+            <button id="nii-to-stl-button" class="primary-action" type="button">Create STL</button>
+          </section>
+
+          <section class="tab-panel" id="match-panel">
+            <label class="file-card">
+              <span>Source STL</span>
+              <input id="match-source-file" type="file" accept=".stl" />
+            </label>
+            <label class="file-card">
+              <span>Target STL</span>
+              <input id="match-target-file" type="file" accept=".stl" />
+            </label>
+            <div class="grid-two">
+              <label>
+                Sample points
+                <input id="match-points" type="number" min="200" max="5000" step="100" value="1200" />
+              </label>
+              <label>
+                ICP iterations
+                <input id="match-iterations" type="number" min="1" max="80" step="1" value="25" />
+              </label>
+            </div>
+            <button id="match-button" class="primary-action" type="button">Estimate transform</button>
+          </section>
+
+          <div class="status-box" aria-live="polite">
+            <strong>Status</strong>
+            <span id="status-text">Ready. Files stay in this browser session.</span>
+          </div>
+        </div>
+
+        <div class="panel output-panel">
+          <div class="viewer-toolbar">
+            <div>
+              <h2>Preview and results</h2>
+              <p id="viewer-caption">Load an STL to preview geometry, or inspect a NIfTI header.</p>
+            </div>
+            <button id="download-button" class="secondary-action" type="button" disabled>Download result</button>
+          </div>
+          <div id="viewer" class="viewer"></div>
+          <pre id="result-log" class="result-log"></pre>
+        </div>
+      </section>
+    </main>
+
+    <script async src="https://unpkg.com/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.164.1/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.164.1/examples/jsm/"
+        }
+      }
+    </script>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
+

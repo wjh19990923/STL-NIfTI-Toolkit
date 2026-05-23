@@ -159,6 +159,9 @@ venv.bak/
 # mkdocs documentation
 /site
 
+# Netlify local state
+.netlify/
+
 # mypy
 .mypy_cache/
 .dmypy.json

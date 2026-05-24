@@ -8,7 +8,7 @@ const state = {
   renderer: null,
   camera: null,
   controls: null,
-  meshObject: null,
+  meshObjects: [],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -84,20 +84,58 @@ function initViewer() {
 
 function previewMesh(mesh, color = 0x2dd4bf) {
   initViewer();
-  if (state.meshObject) {
-    state.scene.remove(state.meshObject);
-    state.meshObject.geometry.dispose();
-    state.meshObject.material.dispose();
+  clearPreviewMeshes();
+  const object = createMeshObject(mesh, { color });
+  state.meshObjects.push(object);
+  state.scene.add(object);
+  framePreviewObjects(state.meshObjects);
+  setViewerLegend([]);
+  $("viewer-caption").textContent = `${mesh.vertices.length.toLocaleString()} vertices, ${mesh.faces.length.toLocaleString()} faces`;
+}
+
+function previewMeshLayers(layers, caption, legendItems) {
+  initViewer();
+  clearPreviewMeshes();
+  for (const layer of layers) {
+    const object = createMeshObject(layer.mesh, layer);
+    state.meshObjects.push(object);
+    state.scene.add(object);
   }
+  framePreviewObjects(state.meshObjects);
+  setViewerLegend(legendItems);
+  $("viewer-caption").textContent = caption;
+}
+
+function clearPreviewMeshes() {
+  for (const object of state.meshObjects) {
+    state.scene.remove(object);
+    object.geometry.dispose();
+    object.material.dispose();
+  }
+  state.meshObjects = [];
+}
+
+function createMeshObject(mesh, options = {}) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(mesh.vertices.flat(), 3));
   geometry.setIndex(mesh.faces.flat());
   geometry.computeVertexNormals();
-  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.62, metalness: 0.05 });
-  state.meshObject = new THREE.Mesh(geometry, material);
-  state.scene.add(state.meshObject);
+  const opacity = options.opacity ?? 1;
+  const material = new THREE.MeshStandardMaterial({
+    color: options.color ?? 0x2dd4bf,
+    roughness: 0.62,
+    metalness: 0.05,
+    opacity,
+    transparent: opacity < 1,
+    depthWrite: opacity >= 1,
+    wireframe: Boolean(options.wireframe),
+  });
+  return new THREE.Mesh(geometry, material);
+}
 
-  const box = new THREE.Box3().setFromObject(state.meshObject);
+function framePreviewObjects(objects) {
+  const box = new THREE.Box3();
+  for (const object of objects) box.expandByObject(object);
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
   const radius = Math.max(size.x, size.y, size.z) || 100;
@@ -106,7 +144,28 @@ function previewMesh(mesh, color = 0x2dd4bf) {
   state.camera.near = Math.max(radius / 1000, 0.01);
   state.camera.far = radius * 20;
   state.camera.updateProjectionMatrix();
-  $("viewer-caption").textContent = `${mesh.vertices.length.toLocaleString()} vertices, ${mesh.faces.length.toLocaleString()} faces`;
+}
+
+function setViewerLegend(items) {
+  const legend = $("viewer-legend");
+  if (!legend) return;
+  legend.replaceChildren();
+  if (!items.length) {
+    legend.hidden = true;
+    return;
+  }
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = "legend-item";
+    const swatch = document.createElement("span");
+    swatch.className = "legend-swatch";
+    swatch.style.setProperty("--swatch", item.color);
+    const label = document.createElement("span");
+    label.textContent = item.label;
+    row.append(swatch, label);
+    legend.append(row);
+  }
+  legend.hidden = false;
 }
 
 function previewNiftiVoxels(nifti) {
@@ -597,6 +656,13 @@ function transformPoint(matrix, point) {
   ];
 }
 
+function transformMesh(mesh, matrix) {
+  return {
+    vertices: mesh.vertices.map((point) => transformPoint(matrix, point)),
+    faces: mesh.faces,
+  };
+}
+
 function centroid(points) {
   const sum = points.reduce((acc, point) => [acc[0] + point[0], acc[1] + point[1], acc[2] + point[2]], [0, 0, 0]);
   return sum.map((v) => v / points.length);
@@ -726,10 +792,30 @@ function wireEvents() {
       setStatus("Running browser ICP...");
       const sourceMesh = parseStl(await readFileBytes(sourceFile));
       const targetMesh = parseStl(await readFileBytes(targetFile));
-      previewMesh(targetMesh, 0x60a5fa);
       const result = estimateTransform(sourceMesh, targetMesh, points, iterations);
+      const alignedSourceMesh = transformMesh(sourceMesh, result.matrix);
+      previewMeshLayers(
+        [
+          { mesh: sourceMesh, color: 0xef4444, opacity: 0.9, wireframe: true },
+          { mesh: targetMesh, color: 0x60a5fa, opacity: 0.46 },
+          { mesh: alignedSourceMesh, color: 0x22c55e, opacity: 0.78 },
+        ],
+        `STL match: initial source, target, and aligned source in one coordinate frame`,
+        [
+          { label: "Source initial", color: "#ef4444" },
+          { label: "Target", color: "#60a5fa" },
+          { label: "Source aligned", color: "#22c55e" },
+        ],
+      );
       setDownload(new Blob([JSON.stringify(result, null, 2)], { type: "application/json" }), `${fileStem(sourceFile.name)}_to_${fileStem(targetFile.name)}_transform.json`);
-      logResult(result);
+      logResult({
+        ...result,
+        visualization: {
+          sourceInitial: "red wireframe",
+          target: "blue translucent surface",
+          sourceAligned: "green translucent surface",
+        },
+      });
       setStatus("Transform estimate is ready.");
     } catch (error) {
       setStatus(error.message);

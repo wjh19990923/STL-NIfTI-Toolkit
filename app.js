@@ -109,6 +109,114 @@ function previewMesh(mesh, color = 0x2dd4bf) {
   $("viewer-caption").textContent = `${mesh.vertices.length.toLocaleString()} vertices, ${mesh.faces.length.toLocaleString()} faces`;
 }
 
+function previewNiftiVoxels(nifti) {
+  const threshold = estimateNiftiThreshold(nifti);
+  const mesh = niftiToPreviewVoxelMesh(nifti, threshold, 7000);
+  previewMesh(mesh, 0xf59e0b);
+  $("viewer-caption").textContent = `NIfTI voxel preview: ${mesh.previewVoxels.toLocaleString()} sampled cubes from ${mesh.activeVoxels.toLocaleString()} active voxels`;
+  return {
+    threshold,
+    activeVoxels: mesh.activeVoxels,
+    previewVoxels: mesh.previewVoxels,
+    samplingStep: mesh.samplingStep,
+    faces: mesh.faces.length,
+  };
+}
+
+function estimateNiftiThreshold(nifti) {
+  const [nx, ny, nz] = nifti.shape;
+  const total = nx * ny * nz;
+  const stride = Math.max(1, Math.floor(total / 20000));
+  const values = [];
+  for (let idx = 0; idx < total; idx += stride) {
+    const value = niftiValueAt(nifti, idx);
+    if (Number.isFinite(value)) values.push(value);
+  }
+  if (!values.length) return 0;
+  values.sort((a, b) => a - b);
+  const min = values[0];
+  const max = values[values.length - 1];
+  if (min < -500 && max > 500) return 300;
+  if (min <= 0 && max <= 1) return 0.5;
+  if (min < 0 && max > 0) return 0;
+  return values[Math.floor(values.length * 0.75)] ?? min;
+}
+
+function niftiToPreviewVoxelMesh(nifti, threshold, maxPreviewVoxels) {
+  const [nx, ny, nz] = nifti.shape;
+  const total = nx * ny * nz;
+  let activeVoxels = 0;
+  for (let idx = 0; idx < total; idx += 1) {
+    if (niftiValueAt(nifti, idx) > threshold) activeVoxels += 1;
+  }
+
+  if (!activeVoxels) {
+    throw new Error(`No voxels passed the preview threshold ${threshold.toFixed(2)}.`);
+  }
+
+  const samplingStep = Math.max(1, Math.ceil(Math.cbrt(activeVoxels / maxPreviewVoxels)));
+  const vertices = [];
+  const faces = [];
+  const spacing = [
+    Math.abs(nifti.pixdim[1]) || 1,
+    Math.abs(nifti.pixdim[2]) || 1,
+    Math.abs(nifti.pixdim[3]) || 1,
+  ];
+  const origin = [nifti.affine[0][3] || 0, nifti.affine[1][3] || 0, nifti.affine[2][3] || 0];
+  const cubeSize = spacing.map((value) => value * Math.max(1, samplingStep) * 0.82);
+  const half = cubeSize.map((value) => value / 2);
+
+  for (let k = 0; k < nz; k += samplingStep) {
+    for (let j = 0; j < ny; j += samplingStep) {
+      for (let i = 0; i < nx; i += samplingStep) {
+        const idx = i + nx * (j + ny * k);
+        if (niftiValueAt(nifti, idx) <= threshold) continue;
+        const center = [
+          origin[0] + (i + 0.5) * spacing[0],
+          origin[1] + (j + 0.5) * spacing[1],
+          origin[2] + (k + 0.5) * spacing[2],
+        ];
+        addPreviewCube(vertices, faces, center, half);
+        if (faces.length / 12 >= maxPreviewVoxels) {
+          return { vertices, faces, activeVoxels, previewVoxels: faces.length / 12, samplingStep };
+        }
+      }
+    }
+  }
+
+  return { vertices, faces, activeVoxels, previewVoxels: faces.length / 12, samplingStep };
+}
+
+function addPreviewCube(vertices, faces, center, half) {
+  const [cx, cy, cz] = center;
+  const [hx, hy, hz] = half;
+  const base = vertices.length;
+  vertices.push(
+    [cx - hx, cy - hy, cz - hz],
+    [cx + hx, cy - hy, cz - hz],
+    [cx + hx, cy + hy, cz - hz],
+    [cx - hx, cy + hy, cz - hz],
+    [cx - hx, cy - hy, cz + hz],
+    [cx + hx, cy - hy, cz + hz],
+    [cx + hx, cy + hy, cz + hz],
+    [cx - hx, cy + hy, cz + hz],
+  );
+  faces.push(
+    [base, base + 2, base + 1],
+    [base, base + 3, base + 2],
+    [base + 4, base + 5, base + 6],
+    [base + 4, base + 6, base + 7],
+    [base, base + 1, base + 5],
+    [base, base + 5, base + 4],
+    [base + 1, base + 2, base + 6],
+    [base + 1, base + 6, base + 5],
+    [base + 2, base + 3, base + 7],
+    [base + 2, base + 7, base + 6],
+    [base + 3, base, base + 4],
+    [base + 3, base + 4, base + 7],
+  );
+}
+
 function parseStl(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const triangleCount = view.getUint32(80, true);
@@ -548,6 +656,7 @@ function wireEvents() {
       const bytes = await readFileBytes(file);
       if (file.name.toLowerCase().includes(".nii")) {
         const nifti = parseNifti(bytes);
+        const preview = previewNiftiVoxels(nifti);
         setDownload(null, "");
         logResult({
           file: file.name,
@@ -556,8 +665,8 @@ function wireEvents() {
           bitpix: nifti.bitpix,
           voxelSize: nifti.pixdim.slice(1, 4),
           affine: nifti.affine,
+          preview,
         });
-        $("viewer-caption").textContent = "NIfTI header parsed successfully.";
       } else {
         const mesh = parseStl(bytes);
         previewMesh(mesh);
@@ -631,4 +740,3 @@ function wireEvents() {
 
 initViewer();
 wireEvents();
-

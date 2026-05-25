@@ -423,23 +423,7 @@ function createNiftiFromStl(mesh, voxelSize, hu, fillInterior) {
     }
   }
 
-  if (fillInterior) {
-    for (let i = 0; i < dims[0]; i += 1) {
-      for (let j = 0; j < dims[1]; j += 1) {
-        let first = -1;
-        let last = -1;
-        for (let k = 0; k < dims[2]; k += 1) {
-          if (mask[i + dims[0] * (j + dims[1] * k)]) {
-            if (first < 0) first = k;
-            last = k;
-          }
-        }
-        if (first >= 0 && last > first) {
-          for (let k = first; k <= last; k += 1) mask[i + dims[0] * (j + dims[1] * k)] = 1;
-        }
-      }
-    }
-  }
+  const filledInteriorVoxels = fillInterior ? fillClosedVoxelShell(mask, dims) : 0;
 
   const headerSize = 352;
   const output = new ArrayBuffer(headerSize + voxelCount * 2);
@@ -465,7 +449,9 @@ function createNiftiFromStl(mesh, voxelSize, hu, fillInterior) {
   view.setFloat32(308, origin[1], true);
   view.setFloat32(324, origin[2], true);
   new Uint8Array(output, 344, 4).set([110, 43, 49, 0]);
+  let occupiedVoxels = 0;
   for (let idx = 0; idx < voxelCount; idx += 1) {
+    if (mask[idx]) occupiedVoxels += 1;
     view.setInt16(headerSize + idx * 2, mask[idx] ? hu : -1024, true);
   }
   return {
@@ -473,7 +459,67 @@ function createNiftiFromStl(mesh, voxelSize, hu, fillInterior) {
     nifti: parseNifti(new Uint8Array(output)),
     dims,
     voxelCount,
+    occupiedVoxels,
+    filledInteriorVoxels,
   };
+}
+
+function fillClosedVoxelShell(mask, dims) {
+  const [nx, ny, nz] = dims;
+  const exterior = new Uint8Array(mask.length);
+  const queue = new Uint32Array(mask.length);
+  let head = 0;
+  let tail = 0;
+  const enqueue = (i, j, k) => {
+    if (i < 0 || j < 0 || k < 0 || i >= nx || j >= ny || k >= nz) return;
+    const idx = i + nx * (j + ny * k);
+    if (mask[idx] || exterior[idx]) return;
+    exterior[idx] = 1;
+    queue[tail] = idx;
+    tail += 1;
+  };
+
+  for (let i = 0; i < nx; i += 1) {
+    for (let j = 0; j < ny; j += 1) {
+      enqueue(i, j, 0);
+      enqueue(i, j, nz - 1);
+    }
+  }
+  for (let i = 0; i < nx; i += 1) {
+    for (let k = 0; k < nz; k += 1) {
+      enqueue(i, 0, k);
+      enqueue(i, ny - 1, k);
+    }
+  }
+  for (let j = 0; j < ny; j += 1) {
+    for (let k = 0; k < nz; k += 1) {
+      enqueue(0, j, k);
+      enqueue(nx - 1, j, k);
+    }
+  }
+
+  while (head < tail) {
+    const idx = queue[head];
+    head += 1;
+    const i = idx % nx;
+    const j = Math.floor(idx / nx) % ny;
+    const k = Math.floor(idx / (nx * ny));
+    enqueue(i + 1, j, k);
+    enqueue(i - 1, j, k);
+    enqueue(i, j + 1, k);
+    enqueue(i, j - 1, k);
+    enqueue(i, j, k + 1);
+    enqueue(i, j, k - 1);
+  }
+
+  let filledInteriorVoxels = 0;
+  for (let idx = 0; idx < mask.length; idx += 1) {
+    if (!mask[idx] && !exterior[idx]) {
+      mask[idx] = 1;
+      filledInteriorVoxels += 1;
+    }
+  }
+  return filledInteriorVoxels;
 }
 
 function niftiToBlockMesh(nifti, threshold, maxVoxels) {
@@ -875,6 +921,10 @@ function wireEvents() {
         output: state.downloadName,
         dimensions: result.dims,
         voxelCount: result.voxelCount,
+        occupiedVoxels: result.occupiedVoxels,
+        fillInterior: $("voxel-fill").checked,
+        fillMethod: $("voxel-fill").checked ? "closed-shell flood fill" : "surface shell only",
+        filledInteriorVoxels: result.filledInteriorVoxels,
         voxelSize,
         hu,
         visualization: {

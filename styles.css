@@ -203,6 +203,16 @@ input[type="number"] {
   font-size: 14px;
 }
 
+.metric-box {
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .status-box strong {
   color: var(--text);
 }

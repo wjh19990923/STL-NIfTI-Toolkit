@@ -27,10 +27,14 @@
 
           <section class="tab-panel active" id="inspect-panel">
             <label class="file-card">
-              <span>STL or NIfTI file</span>
+              <span>STL or NIfTI file A</span>
               <input id="inspect-file" type="file" accept=".stl,.nii,.gz" />
             </label>
-            <button id="inspect-button" class="primary-action" type="button">Inspect file</button>
+            <label class="file-card">
+              <span>STL or NIfTI file B</span>
+              <input id="inspect-file-b" type="file" accept=".stl,.nii,.gz" />
+            </label>
+            <button id="inspect-button" class="primary-action" type="button">Inspect files</button>
           </section>
 
           <section class="tab-panel" id="stl-to-nii-panel">
@@ -70,6 +74,7 @@
                 <input id="nii-max-voxels" type="number" min="1000" step="1000" value="250000" />
               </label>
             </div>
+            <div id="nii-voxel-summary" class="metric-box">Choose a NIfTI file to estimate voxel counts.</div>
             <button id="nii-to-stl-button" class="primary-action" type="button">Create STL</button>
           </section>
 

@@ -169,17 +169,22 @@ function setViewerLegend(items) {
 }
 
 function previewNiftiVoxels(nifti) {
-  const threshold = estimateNiftiThreshold(nifti);
-  const mesh = niftiToPreviewVoxelMesh(nifti, threshold, 7000);
-  previewMesh(mesh, 0xf59e0b);
-  $("viewer-caption").textContent = `NIfTI voxel preview: ${mesh.previewVoxels.toLocaleString()} sampled cubes from ${mesh.activeVoxels.toLocaleString()} active voxels`;
-  return {
+  const preview = createNiftiPreview(nifti);
+  previewMesh(preview.mesh, 0xf59e0b);
+  $("viewer-caption").textContent = `NIfTI voxel preview: ${preview.previewVoxels.toLocaleString()} sampled cubes from ${preview.activeVoxels.toLocaleString()} active voxels`;
+  return preview.meta;
+}
+
+function createNiftiPreview(nifti, threshold = estimateNiftiThreshold(nifti), maxPreviewVoxels = 7000) {
+  const mesh = niftiToPreviewVoxelMesh(nifti, threshold, maxPreviewVoxels);
+  const meta = {
     threshold,
     activeVoxels: mesh.activeVoxels,
     previewVoxels: mesh.previewVoxels,
     samplingStep: mesh.samplingStep,
     faces: mesh.faces.length,
   };
+  return { mesh, meta, ...meta };
 }
 
 function estimateNiftiThreshold(nifti) {
@@ -463,20 +468,33 @@ function createNiftiFromStl(mesh, voxelSize, hu, fillInterior) {
   for (let idx = 0; idx < voxelCount; idx += 1) {
     view.setInt16(headerSize + idx * 2, mask[idx] ? hu : -1024, true);
   }
-  return { blob: new Blob([output], { type: "application/octet-stream" }), dims, voxelCount };
+  return {
+    blob: new Blob([output], { type: "application/octet-stream" }),
+    nifti: parseNifti(new Uint8Array(output)),
+    dims,
+    voxelCount,
+  };
 }
 
 function niftiToBlockMesh(nifti, threshold, maxVoxels) {
   const [nx, ny, nz] = nifti.shape;
+  const { totalVoxels: total, activeVoxels } = summarizeNiftiVoxels(nifti, threshold);
+
+  if (!activeVoxels) {
+    throw new Error(`No voxels passed the threshold ${threshold}.`);
+  }
+
+  const samplingStep = activeVoxels > maxVoxels ? Math.ceil(Math.cbrt(activeVoxels / maxVoxels)) : 1;
   const selected = [];
   const active = new Set();
-  const total = nx * ny * nz;
-  for (let idx = 0; idx < total; idx += 1) {
-    if (niftiValueAt(nifti, idx) > threshold) {
-      active.add(idx);
-      selected.push(idx);
-      if (selected.length > maxVoxels) {
-        throw new Error(`More than ${maxVoxels.toLocaleString()} voxels passed the threshold. Raise threshold or max voxels carefully.`);
+  for (let k = 0; k < nz; k += samplingStep) {
+    for (let j = 0; j < ny; j += samplingStep) {
+      for (let i = 0; i < nx; i += samplingStep) {
+        const idx = i + nx * (j + ny * k);
+        if (niftiValueAt(nifti, idx) > threshold) {
+          active.add(idx);
+          selected.push(idx);
+        }
       }
     }
   }
@@ -486,12 +504,12 @@ function niftiToBlockMesh(nifti, threshold, maxVoxels) {
   const spacing = [nifti.pixdim[1] || 1, nifti.pixdim[2] || 1, nifti.pixdim[3] || 1];
   const origin = [nifti.affine[0][3] || 0, nifti.affine[1][3] || 0, nifti.affine[2][3] || 0];
   const directions = [
-    [1, 0, 0],
-    [-1, 0, 0],
-    [0, 1, 0],
-    [0, -1, 0],
-    [0, 0, 1],
-    [0, 0, -1],
+    [samplingStep, 0, 0],
+    [-samplingStep, 0, 0],
+    [0, samplingStep, 0],
+    [0, -samplingStep, 0],
+    [0, 0, samplingStep],
+    [0, 0, -samplingStep],
   ];
   const faceCorners = [
     [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]],
@@ -515,15 +533,40 @@ function niftiToBlockMesh(nifti, threshold, maxVoxels) {
       const base = vertices.length;
       for (const corner of faceCorners[side]) {
         vertices.push([
-          origin[0] + (i + corner[0]) * spacing[0],
-          origin[1] + (j + corner[1]) * spacing[1],
-          origin[2] + (k + corner[2]) * spacing[2],
+          origin[0] + Math.min(i + corner[0] * samplingStep, nx) * spacing[0],
+          origin[1] + Math.min(j + corner[1] * samplingStep, ny) * spacing[1],
+          origin[2] + Math.min(k + corner[2] * samplingStep, nz) * spacing[2],
         ]);
       }
       faces.push([base, base + 1, base + 2], [base, base + 2, base + 3]);
     }
   }
-  return { vertices, faces, selectedCount: selected.length };
+  return { vertices, faces, selectedCount: selected.length, activeVoxels, samplingStep };
+}
+
+function summarizeNiftiVoxels(nifti, threshold) {
+  const [nx, ny, nz] = nifti.shape;
+  const totalVoxels = nx * ny * nz;
+  let activeVoxels = 0;
+  for (let idx = 0; idx < totalVoxels; idx += 1) {
+    if (niftiValueAt(nifti, idx) > threshold) activeVoxels += 1;
+  }
+  return { totalVoxels, activeVoxels };
+}
+
+function renderNiftiVoxelSummary(summary, threshold, maxVoxels) {
+  const box = $("nii-voxel-summary");
+  if (!box) return;
+  const samplingStep = summary.activeVoxels > maxVoxels ? Math.ceil(Math.cbrt(summary.activeVoxels / maxVoxels)) : 1;
+  const exportedEstimate = samplingStep > 1 ? Math.ceil(summary.activeVoxels / samplingStep ** 3) : summary.activeVoxels;
+  box.textContent = [
+    `Total voxels: ${summary.totalVoxels.toLocaleString()}`,
+    `Active voxels above threshold ${threshold}: ${summary.activeVoxels.toLocaleString()}`,
+    `Max voxels target: ${maxVoxels.toLocaleString()}`,
+    samplingStep > 1
+      ? `Sampling will be used: step ${samplingStep}, roughly ${exportedEstimate.toLocaleString()} exported voxels.`
+      : "Full-resolution block export is expected.",
+  ].join("\n");
 }
 
 function meshToBinaryStl(mesh, name = "created by STL NIfTI Toolkit") {
@@ -696,6 +739,71 @@ function fileStem(name) {
   return name.replace(/\.nii\.gz$/i, "").replace(/\.[^.]+$/i, "");
 }
 
+function isNiftiFile(file) {
+  return file.name.toLowerCase().includes(".nii");
+}
+
+async function updateNiftiConversionSummary() {
+  const file = $("nii-file").files?.[0];
+  const box = $("nii-voxel-summary");
+  if (!file) {
+    if (box) box.textContent = "Choose a NIfTI file to estimate voxel counts.";
+    return null;
+  }
+  try {
+    const threshold = Number($("nii-threshold").value);
+    const maxVoxels = Number($("nii-max-voxels").value);
+    if (box) box.textContent = "Reading voxel counts...";
+    const nifti = parseNifti(await readFileBytes(file));
+    const summary = summarizeNiftiVoxels(nifti, threshold);
+    renderNiftiVoxelSummary(summary, threshold, maxVoxels);
+    return { nifti, summary, threshold, maxVoxels };
+  } catch (error) {
+    if (box) box.textContent = error.message;
+    return null;
+  }
+}
+
+async function buildInspectionItem(file, slot) {
+  const bytes = await readFileBytes(file);
+  const palette = [
+    { stl: 0x2dd4bf, stlHex: "#2dd4bf", nifti: 0xf59e0b, niftiHex: "#f59e0b" },
+    { stl: 0xa78bfa, stlHex: "#a78bfa", nifti: 0xf97316, niftiHex: "#f97316" },
+  ][slot];
+
+  if (isNiftiFile(file)) {
+    const nifti = parseNifti(bytes);
+    const preview = createNiftiPreview(nifti);
+    return {
+      layer: { mesh: preview.mesh, color: palette.nifti, opacity: 0.82 },
+      legend: { label: `File ${slot + 1}: NIfTI voxels`, color: palette.niftiHex },
+      result: {
+        file: file.name,
+        type: "NIfTI",
+        shape: nifti.shape,
+        datatype: nifti.datatype,
+        bitpix: nifti.bitpix,
+        voxelSize: nifti.pixdim.slice(1, 4),
+        affine: nifti.affine,
+        preview: preview.meta,
+      },
+    };
+  }
+
+  const mesh = parseStl(bytes);
+  return {
+    layer: { mesh, color: palette.stl, opacity: slot === 0 ? 0.82 : 0.68 },
+    legend: { label: `File ${slot + 1}: STL surface`, color: palette.stlHex },
+    result: {
+      file: file.name,
+      type: "STL",
+      vertices: mesh.vertices.length,
+      faces: mesh.faces.length,
+      bounds: meshBounds(mesh),
+    },
+  };
+}
+
 function wireEvents() {
   document.querySelectorAll(".tab-button").forEach((button) => {
     button.addEventListener("click", () => {
@@ -715,30 +823,26 @@ function wireEvents() {
     URL.revokeObjectURL(url);
   });
 
+  $("nii-file").addEventListener("change", updateNiftiConversionSummary);
+  $("nii-threshold").addEventListener("change", updateNiftiConversionSummary);
+  $("nii-max-voxels").addEventListener("change", updateNiftiConversionSummary);
+
   $("inspect-button").addEventListener("click", async () => {
     try {
-      const file = activeFile("inspect-file");
-      setStatus(`Reading ${file.name}...`);
-      const bytes = await readFileBytes(file);
-      if (file.name.toLowerCase().includes(".nii")) {
-        const nifti = parseNifti(bytes);
-        const preview = previewNiftiVoxels(nifti);
-        setDownload(null, "");
-        logResult({
-          file: file.name,
-          shape: nifti.shape,
-          datatype: nifti.datatype,
-          bitpix: nifti.bitpix,
-          voxelSize: nifti.pixdim.slice(1, 4),
-          affine: nifti.affine,
-          preview,
-        });
-      } else {
-        const mesh = parseStl(bytes);
-        previewMesh(mesh);
-        const bounds = meshBounds(mesh);
-        logResult({ file: file.name, vertices: mesh.vertices.length, faces: mesh.faces.length, bounds });
+      const files = [$("inspect-file").files?.[0], $("inspect-file-b").files?.[0]].filter(Boolean);
+      if (!files.length) throw new Error("Please choose at least one input file first.");
+      setStatus(`Reading ${files.length} file${files.length > 1 ? "s" : ""}...`);
+      const items = [];
+      for (let index = 0; index < files.length; index += 1) {
+        items.push(await buildInspectionItem(files[index], index));
       }
+      previewMeshLayers(
+        items.map((item) => item.layer),
+        files.length === 1 ? `Inspect preview: ${items[0].result.file}` : "Inspect preview: two files in one coordinate frame",
+        items.map((item) => item.legend),
+      );
+      setDownload(null, "");
+      logResult({ files: items.map((item) => item.result) });
       setStatus("Inspection complete.");
     } catch (error) {
       setStatus(error.message);
@@ -753,10 +857,32 @@ function wireEvents() {
       const hu = Number($("voxel-hu").value);
       setStatus(`Voxelizing ${file.name}...`);
       const mesh = parseStl(await readFileBytes(file));
-      previewMesh(mesh);
       const result = createNiftiFromStl(mesh, voxelSize, hu, $("voxel-fill").checked);
+      const niftiPreview = createNiftiPreview(result.nifti);
+      previewMeshLayers(
+        [
+          { mesh, color: 0x2dd4bf, opacity: 0.42, wireframe: true },
+          { mesh: niftiPreview.mesh, color: 0xf59e0b, opacity: 0.84 },
+        ],
+        "STL to NIfTI: source surface and generated voxel preview",
+        [
+          { label: "Input STL surface", color: "#2dd4bf" },
+          { label: "Output NIfTI voxels", color: "#f59e0b" },
+        ],
+      );
       setDownload(result.blob, `${fileStem(file.name)}_HU${hu}_browser.nii`);
-      logResult({ output: state.downloadName, dimensions: result.dims, voxelCount: result.voxelCount, voxelSize, hu });
+      logResult({
+        output: state.downloadName,
+        dimensions: result.dims,
+        voxelCount: result.voxelCount,
+        voxelSize,
+        hu,
+        visualization: {
+          inputStl: "teal wireframe",
+          outputNifti: "orange sampled voxel cubes",
+          outputPreview: niftiPreview.meta,
+        },
+      });
       setStatus("NIfTI file is ready for download.");
     } catch (error) {
       setStatus(error.message);
@@ -771,12 +897,40 @@ function wireEvents() {
       const maxVoxels = Number($("nii-max-voxels").value);
       setStatus(`Extracting block surface from ${file.name}...`);
       const nifti = parseNifti(await readFileBytes(file));
+      const summary = summarizeNiftiVoxels(nifti, threshold);
+      renderNiftiVoxelSummary(summary, threshold, maxVoxels);
       const mesh = niftiToBlockMesh(nifti, threshold, maxVoxels);
-      previewMesh(mesh, 0xf59e0b);
+      const niftiPreview = createNiftiPreview(nifti, threshold);
+      previewMeshLayers(
+        [
+          { mesh: niftiPreview.mesh, color: 0xf59e0b, opacity: 0.55 },
+          { mesh, color: 0x22c55e, opacity: 0.88, wireframe: true },
+        ],
+        "NIfTI to STL: input voxel preview and extracted STL surface",
+        [
+          { label: "Input NIfTI voxels", color: "#f59e0b" },
+          { label: "Output STL surface", color: "#22c55e" },
+        ],
+      );
       const blob = meshToBinaryStl(mesh, "NIfTI block surface");
-      setDownload(blob, `${fileStem(file.name)}_threshold_${threshold}.stl`);
-      logResult({ output: state.downloadName, activeVoxels: mesh.selectedCount, faces: mesh.faces.length, threshold });
-      setStatus("STL file is ready for download.");
+      const samplingSuffix = mesh.samplingStep > 1 ? `_sampled_step${mesh.samplingStep}` : "";
+      setDownload(blob, `${fileStem(file.name)}_threshold_${threshold}${samplingSuffix}.stl`);
+      logResult({
+        output: state.downloadName,
+        totalVoxels: summary.totalVoxels,
+        activeVoxels: mesh.activeVoxels,
+        exportedVoxels: mesh.selectedCount,
+        samplingStep: mesh.samplingStep,
+        sampled: mesh.samplingStep > 1,
+        faces: mesh.faces.length,
+        threshold,
+        visualization: {
+          inputNifti: "orange sampled voxel cubes",
+          outputStl: "green wireframe surface",
+          inputPreview: niftiPreview.meta,
+        },
+      });
+      setStatus(mesh.samplingStep > 1 ? `Sampled STL file is ready for download (step ${mesh.samplingStep}).` : "STL file is ready for download.");
     } catch (error) {
       setStatus(error.message);
       logResult(error.stack || error.message);

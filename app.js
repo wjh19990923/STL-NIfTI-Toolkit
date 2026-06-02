@@ -395,9 +395,9 @@ function niftiValueAt(nifti, index) {
 
 function createNiftiFromStl(mesh, voxelSize, hu, fillInterior) {
   const bounds = meshBounds(mesh);
-  const padding = voxelSize * 2;
-  const origin = bounds.min.map((v) => v - padding);
-  const dims = bounds.extent.map((v) => Math.max(3, Math.ceil((v + padding * 2) / voxelSize) + 1));
+  const dims = bounds.extent.map((value) => Math.max(1, Math.floor(value / voxelSize)));
+  const center = bounds.min.map((value, axis) => 0.5 * (value + bounds.max[axis]));
+  const origin = center.map((value, axis) => value - 0.5 * voxelSize * dims[axis]);
   const voxelCount = dims[0] * dims[1] * dims[2];
   if (voxelCount > 9000000) {
     throw new Error(`Requested grid has ${voxelCount.toLocaleString()} voxels. Increase voxel size for browser processing.`);

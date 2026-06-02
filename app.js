@@ -350,6 +350,7 @@ function parseNifti(bytes) {
   for (let i = 0; i < 8; i += 1) dims.push(view.getInt16(40 + i * 2, true));
   const datatype = view.getInt16(70, true);
   const bitpix = view.getInt16(72, true);
+  const xyztUnits = view.getUint8(123);
   const pixdim = [];
   for (let i = 0; i < 8; i += 1) pixdim.push(view.getFloat32(76 + i * 4, true));
   const voxOffset = Math.floor(view.getFloat32(108, true));
@@ -360,7 +361,15 @@ function parseNifti(bytes) {
     [0, 0, 0, 1],
   ];
   const shape = [dims[1], dims[2], dims[3]].map((v) => Math.max(1, v));
-  return { bytes, shape, datatype, bitpix, pixdim, voxOffset, affine };
+  return { bytes, shape, datatype, bitpix, xyztUnits, spatialUnit: niftiSpatialUnit(xyztUnits), pixdim, voxOffset, affine };
+}
+
+function niftiSpatialUnit(xyztUnits) {
+  const spatialCode = xyztUnits & 0x07;
+  if (spatialCode === 1) return "m";
+  if (spatialCode === 2) return "mm";
+  if (spatialCode === 3) return "um";
+  return "unknown";
 }
 
 function niftiValueAt(nifti, index) {
@@ -441,7 +450,9 @@ function createNiftiFromStl(mesh, voxelSize, hu, fillInterior) {
   view.setFloat32(88, voxelSize, true);
   view.setFloat32(108, headerSize, true);
   view.setFloat32(112, 1, true);
-  view.setInt16(252, 2, true);
+  view.setUint8(123, 2);
+  view.setInt16(252, 0, true);
+  view.setInt16(254, 2, true);
   view.setFloat32(280, voxelSize, true);
   view.setFloat32(296, voxelSize, true);
   view.setFloat32(312, voxelSize, true);
@@ -829,6 +840,7 @@ async function buildInspectionItem(file, slot) {
         shape: nifti.shape,
         datatype: nifti.datatype,
         bitpix: nifti.bitpix,
+        spatialUnit: nifti.spatialUnit,
         voxelSize: nifti.pixdim.slice(1, 4),
         affine: nifti.affine,
         preview: preview.meta,
@@ -922,6 +934,7 @@ function wireEvents() {
         dimensions: result.dims,
         voxelCount: result.voxelCount,
         occupiedVoxels: result.occupiedVoxels,
+        spatialUnit: result.nifti.spatialUnit,
         fillInterior: $("voxel-fill").checked,
         fillMethod: $("voxel-fill").checked ? "closed-shell flood fill" : "surface shell only",
         filledInteriorVoxels: result.filledInteriorVoxels,

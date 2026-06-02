@@ -454,8 +454,8 @@ function createNiftiFromStl(mesh, voxelSize, hu, fillInterior) {
   view.setInt16(252, 0, true);
   view.setInt16(254, 2, true);
   view.setFloat32(280, voxelSize, true);
-  view.setFloat32(296, voxelSize, true);
-  view.setFloat32(312, voxelSize, true);
+  view.setFloat32(300, voxelSize, true);
+  view.setFloat32(320, voxelSize, true);
   view.setFloat32(292, origin[0], true);
   view.setFloat32(308, origin[1], true);
   view.setFloat32(324, origin[2], true);

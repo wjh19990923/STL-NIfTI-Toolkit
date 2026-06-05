@@ -22,6 +22,7 @@
             <button class="tab-button active" data-tab="inspect" type="button">Inspect</button>
             <button class="tab-button" data-tab="stl-to-nii" type="button">STL to NIfTI</button>
             <button class="tab-button" data-tab="nii-to-stl" type="button">NIfTI to STL</button>
+            <button class="tab-button" data-tab="downsample" type="button">Downsample</button>
             <button class="tab-button" data-tab="match" type="button">STL Match</button>
           </div>
 
@@ -76,6 +77,28 @@
             </div>
             <div id="nii-voxel-summary" class="metric-box">Choose a NIfTI file to estimate voxel counts.</div>
             <button id="nii-to-stl-button" class="primary-action" type="button">Create STL</button>
+          </section>
+
+          <section class="tab-panel" id="downsample-panel">
+            <label class="file-card">
+              <span>Input NIfTI</span>
+              <input id="downsample-file" type="file" accept=".nii,.gz" />
+            </label>
+            <div class="grid-two">
+              <label>
+                Scaling factor
+                <input id="downsample-factor" type="number" min="1" step="1" value="2" />
+              </label>
+              <label>
+                Mask threshold
+                <input id="downsample-mask-threshold" type="number" step="50" value="-500" />
+              </label>
+            </div>
+            <label>
+              Background value
+              <input id="downsample-background" type="number" step="1" value="-1024" />
+            </label>
+            <button id="downsample-button" class="primary-action" type="button">Downsample NIfTI</button>
           </section>
 
           <section class="tab-panel" id="match-panel">

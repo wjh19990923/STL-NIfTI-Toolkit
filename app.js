@@ -354,6 +354,8 @@ function parseNifti(bytes) {
   const pixdim = [];
   for (let i = 0; i < 8; i += 1) pixdim.push(view.getFloat32(76 + i * 4, true));
   const voxOffset = Math.floor(view.getFloat32(108, true));
+  const sclSlope = view.getFloat32(112, true);
+  const sclInter = view.getFloat32(116, true);
   const affine = [
     [view.getFloat32(280, true), view.getFloat32(284, true), view.getFloat32(288, true), view.getFloat32(292, true)],
     [view.getFloat32(296, true), view.getFloat32(300, true), view.getFloat32(304, true), view.getFloat32(308, true)],
@@ -361,7 +363,19 @@ function parseNifti(bytes) {
     [0, 0, 0, 1],
   ];
   const shape = [dims[1], dims[2], dims[3]].map((v) => Math.max(1, v));
-  return { bytes, shape, datatype, bitpix, xyztUnits, spatialUnit: niftiSpatialUnit(xyztUnits), pixdim, voxOffset, affine };
+  return {
+    bytes,
+    shape,
+    datatype,
+    bitpix,
+    xyztUnits,
+    spatialUnit: niftiSpatialUnit(xyztUnits),
+    pixdim,
+    voxOffset,
+    sclSlope: Number.isFinite(sclSlope) && sclSlope !== 0 ? sclSlope : 1,
+    sclInter: Number.isFinite(sclInter) ? sclInter : 0,
+    affine,
+  };
 }
 
 function niftiSpatialUnit(xyztUnits) {
@@ -375,22 +389,30 @@ function niftiSpatialUnit(xyztUnits) {
 function niftiValueAt(nifti, index) {
   const view = new DataView(nifti.bytes.buffer, nifti.bytes.byteOffset + nifti.voxOffset);
   const offset = index * (nifti.bitpix / 8);
+  let value;
   switch (nifti.datatype) {
     case 2:
-      return view.getUint8(offset);
+      value = view.getUint8(offset);
+      break;
     case 4:
-      return view.getInt16(offset, true);
+      value = view.getInt16(offset, true);
+      break;
     case 8:
-      return view.getInt32(offset, true);
+      value = view.getInt32(offset, true);
+      break;
     case 16:
-      return view.getFloat32(offset, true);
+      value = view.getFloat32(offset, true);
+      break;
     case 64:
-      return view.getFloat64(offset, true);
+      value = view.getFloat64(offset, true);
+      break;
     case 512:
-      return view.getUint16(offset, true);
+      value = view.getUint16(offset, true);
+      break;
     default:
       throw new Error(`Unsupported NIfTI datatype: ${nifti.datatype}`);
   }
+  return value * (nifti.sclSlope ?? 1) + (nifti.sclInter ?? 0);
 }
 
 function createNiftiFromStl(mesh, voxelSize, hu, fillInterior) {
@@ -624,6 +646,192 @@ function renderNiftiVoxelSummary(summary, threshold, maxVoxels) {
       ? `Sampling will be used: step ${samplingStep}, roughly ${exportedEstimate.toLocaleString()} exported voxels.`
       : "Full-resolution block export is expected.",
   ].join("\n");
+}
+
+function downsampleNifti(nifti, scalingFactor, maskThreshold, backgroundValue) {
+  if (!Number.isFinite(scalingFactor) || scalingFactor < 1) throw new Error("Scaling factor must be at least 1.");
+  const factor = Math.max(1, Math.round(scalingFactor));
+  const [nx, ny, nz] = nifti.shape;
+  const total = nx * ny * nz;
+  if (total > 25000000) {
+    throw new Error(`Input has ${total.toLocaleString()} voxels. This is too large for browser downsampling.`);
+  }
+
+  const data = new Float32Array(total);
+  let inputMin = Infinity;
+  let inputMax = -Infinity;
+  let activeVoxels = 0;
+  const cropMin = [nx, ny, nz];
+  const cropMax = [-1, -1, -1];
+
+  for (let k = 0; k < nz; k += 1) {
+    for (let j = 0; j < ny; j += 1) {
+      for (let i = 0; i < nx; i += 1) {
+        const idx = i + nx * (j + ny * k);
+        const value = niftiValueAt(nifti, idx);
+        data[idx] = value;
+        if (Number.isFinite(value)) {
+          inputMin = Math.min(inputMin, value);
+          inputMax = Math.max(inputMax, value);
+        }
+        if (value > maskThreshold) {
+          activeVoxels += 1;
+          cropMin[0] = Math.min(cropMin[0], i);
+          cropMin[1] = Math.min(cropMin[1], j);
+          cropMin[2] = Math.min(cropMin[2], k);
+          cropMax[0] = Math.max(cropMax[0], i);
+          cropMax[1] = Math.max(cropMax[1], j);
+          cropMax[2] = Math.max(cropMax[2], k);
+        }
+      }
+    }
+  }
+
+  if (!activeVoxels) {
+    throw new Error(`No voxels are above mask threshold ${maskThreshold}. Lower the threshold and try again.`);
+  }
+
+  const croppedShape = cropMax.map((maxValue, axis) => maxValue - cropMin[axis] + 1);
+  const outputShape = croppedShape.map((value) => Math.max(1, Math.ceil(value / factor)));
+  const outputCount = outputShape[0] * outputShape[1] * outputShape[2];
+  const outputData = new Float32Array(outputCount);
+
+  let outputMin = Infinity;
+  let outputMax = -Infinity;
+  let backgroundVoxels = 0;
+  for (let k = 0; k < outputShape[2]; k += 1) {
+    for (let j = 0; j < outputShape[1]; j += 1) {
+      for (let i = 0; i < outputShape[0]; i += 1) {
+        const source = [
+          Math.min(cropMin[0] + i * factor, cropMax[0]),
+          Math.min(cropMin[1] + j * factor, cropMax[1]),
+          Math.min(cropMin[2] + k * factor, cropMax[2]),
+        ];
+        let value = trilinearSample(data, nifti.shape, source);
+        if (!Number.isFinite(value) || value <= 0.1) {
+          value = backgroundValue;
+          backgroundVoxels += 1;
+        }
+        const outIdx = i + outputShape[0] * (j + outputShape[1] * k);
+        outputData[outIdx] = value;
+        outputMin = Math.min(outputMin, value);
+        outputMax = Math.max(outputMax, value);
+      }
+    }
+  }
+
+  const croppedAffine = translateAffineByVoxel(nifti.affine, cropMin);
+  const outputAffine = scaleAffineVoxelColumns(croppedAffine, factor);
+  const blob = createFloat32NiftiBlob(outputData, outputShape, outputAffine, nifti.xyztUnits);
+  const outputNifti = parseNifti(new Uint8Array(blob.buffer));
+
+  return {
+    blob: new Blob([blob.buffer], { type: "application/octet-stream" }),
+    nifti: outputNifti,
+    inputShape: nifti.shape,
+    croppedShape,
+    outputShape,
+    scalingFactor: factor,
+    inputVoxelSize: voxelSizesFromAffine(nifti.affine, nifti.pixdim),
+    outputVoxelSize: voxelSizesFromAffine(outputAffine),
+    activeVoxels,
+    outputVoxels: outputCount,
+    backgroundVoxels,
+    inputRange: [inputMin, inputMax],
+    outputRange: [outputMin, outputMax],
+    cropMin,
+    cropMax,
+    affine: outputAffine,
+  };
+}
+
+function trilinearSample(data, shape, point) {
+  const [nx, ny, nz] = shape;
+  const x0 = Math.floor(point[0]);
+  const y0 = Math.floor(point[1]);
+  const z0 = Math.floor(point[2]);
+  const x1 = Math.min(x0 + 1, nx - 1);
+  const y1 = Math.min(y0 + 1, ny - 1);
+  const z1 = Math.min(z0 + 1, nz - 1);
+  const xd = point[0] - x0;
+  const yd = point[1] - y0;
+  const zd = point[2] - z0;
+  const at = (i, j, k) => data[i + nx * (j + ny * k)];
+  const c00 = at(x0, y0, z0) * (1 - xd) + at(x1, y0, z0) * xd;
+  const c01 = at(x0, y0, z1) * (1 - xd) + at(x1, y0, z1) * xd;
+  const c10 = at(x0, y1, z0) * (1 - xd) + at(x1, y1, z0) * xd;
+  const c11 = at(x0, y1, z1) * (1 - xd) + at(x1, y1, z1) * xd;
+  const c0 = c00 * (1 - yd) + c10 * yd;
+  const c1 = c01 * (1 - yd) + c11 * yd;
+  return c0 * (1 - zd) + c1 * zd;
+}
+
+function translateAffineByVoxel(affine, voxelOffset) {
+  return affine.map((row, r) => {
+    if (r === 3) return [...row];
+    return [
+      row[0],
+      row[1],
+      row[2],
+      row[3] + row[0] * voxelOffset[0] + row[1] * voxelOffset[1] + row[2] * voxelOffset[2],
+    ];
+  });
+}
+
+function scaleAffineVoxelColumns(affine, factor) {
+  return affine.map((row, r) => {
+    if (r === 3) return [...row];
+    return [row[0] * factor, row[1] * factor, row[2] * factor, row[3]];
+  });
+}
+
+function voxelSizesFromAffine(affine, fallbackPixdim = []) {
+  return [0, 1, 2].map((axis) => {
+    const size = Math.hypot(affine[0][axis], affine[1][axis], affine[2][axis]);
+    return size || Math.abs(fallbackPixdim[axis + 1]) || 1;
+  });
+}
+
+function createFloat32NiftiBlob(data, shape, affine, xyztUnits = 2) {
+  const headerSize = 352;
+  const buffer = new ArrayBuffer(headerSize + data.length * 4);
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  const voxelSizes = voxelSizesFromAffine(affine);
+  view.setInt32(0, 348, true);
+  view.setInt16(40, 3, true);
+  view.setInt16(42, shape[0], true);
+  view.setInt16(44, shape[1], true);
+  view.setInt16(46, shape[2], true);
+  view.setInt16(70, 16, true);
+  view.setInt16(72, 32, true);
+  view.setFloat32(76, 1, true);
+  view.setFloat32(80, voxelSizes[0], true);
+  view.setFloat32(84, voxelSizes[1], true);
+  view.setFloat32(88, voxelSizes[2], true);
+  view.setFloat32(108, headerSize, true);
+  view.setFloat32(112, 1, true);
+  view.setFloat32(116, 0, true);
+  view.setUint8(123, xyztUnits || 2);
+  view.setInt16(252, 0, true);
+  view.setInt16(254, 2, true);
+  view.setFloat32(280, affine[0][0], true);
+  view.setFloat32(284, affine[0][1], true);
+  view.setFloat32(288, affine[0][2], true);
+  view.setFloat32(292, affine[0][3], true);
+  view.setFloat32(296, affine[1][0], true);
+  view.setFloat32(300, affine[1][1], true);
+  view.setFloat32(304, affine[1][2], true);
+  view.setFloat32(308, affine[1][3], true);
+  view.setFloat32(312, affine[2][0], true);
+  view.setFloat32(316, affine[2][1], true);
+  view.setFloat32(320, affine[2][2], true);
+  view.setFloat32(324, affine[2][3], true);
+  bytes.set([110, 43, 49, 0], 344);
+  for (let idx = 0; idx < data.length; idx += 1) {
+    view.setFloat32(headerSize + idx * 4, data[idx], true);
+  }
+  return { buffer };
 }
 
 function meshToBinaryStl(mesh, name = "created by STL NIfTI Toolkit") {
@@ -994,6 +1202,62 @@ function wireEvents() {
         },
       });
       setStatus(mesh.samplingStep > 1 ? `Sampled STL file is ready for download (step ${mesh.samplingStep}).` : "STL file is ready for download.");
+    } catch (error) {
+      setStatus(error.message);
+      logResult(error.stack || error.message);
+    }
+  });
+
+  $("downsample-button").addEventListener("click", async () => {
+    try {
+      const file = activeFile("downsample-file");
+      const factor = Number($("downsample-factor").value);
+      const maskThreshold = Number($("downsample-mask-threshold").value);
+      const backgroundValue = Number($("downsample-background").value);
+      setStatus(`Downsampling ${file.name}...`);
+      const inputNifti = parseNifti(await readFileBytes(file));
+      const result = downsampleNifti(inputNifti, factor, maskThreshold, backgroundValue);
+      const inputPreview = createNiftiPreview(inputNifti, maskThreshold, 4500);
+      const outputPreview = createNiftiPreview(result.nifti, maskThreshold, 4500);
+      previewMeshLayers(
+        [
+          { mesh: inputPreview.mesh, color: 0xf59e0b, opacity: 0.44 },
+          { mesh: outputPreview.mesh, color: 0x22c55e, opacity: 0.84 },
+        ],
+        "Downsample NIfTI: original voxels and resampled output in one coordinate frame",
+        [
+          { label: "Input NIfTI voxels", color: "#f59e0b" },
+          { label: "Downsampled NIfTI voxels", color: "#22c55e" },
+        ],
+      );
+      setDownload(result.blob, `${fileStem(file.name)}_downsample_x${result.scalingFactor}.nii`);
+      logResult({
+        output: state.downloadName,
+        inputShape: result.inputShape,
+        croppedShape: result.croppedShape,
+        outputShape: result.outputShape,
+        inputVoxelSize: result.inputVoxelSize,
+        outputVoxelSize: result.outputVoxelSize,
+        scalingFactor: result.scalingFactor,
+        maskThreshold,
+        backgroundValue,
+        activeVoxels: result.activeVoxels,
+        outputVoxels: result.outputVoxels,
+        backgroundVoxels: result.backgroundVoxels,
+        inputRange: result.inputRange,
+        outputRange: result.outputRange,
+        cropMin: result.cropMin,
+        cropMax: result.cropMax,
+        affine: result.affine,
+        spatialUnit: result.nifti.spatialUnit,
+        visualization: {
+          inputNifti: "orange sampled voxel cubes",
+          outputNifti: "green sampled voxel cubes",
+          inputPreview: inputPreview.meta,
+          outputPreview: outputPreview.meta,
+        },
+      });
+      setStatus("Downsampled NIfTI file is ready for download.");
     } catch (error) {
       setStatus(error.message);
       logResult(error.stack || error.message);
